@@ -3,181 +3,226 @@ library(ggplot2)
 library(reshape2)
 library(dplyr)
 
+seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio2/trio2_all.fa'
 
-# Function to check if all elements in a vector are the same
+reference_seqname <- "child"
+x_label_dist <- 10
+start = 0 # 5900
+end = 1000000 #6000
+# Base-specific colors for Plot 1
+base_colors <- c(
+  "A" = "green",
+  "T" = "red",
+  "G" = "orange",
+  "C" = "orange",
+  "-" = "black",
+  "N" = "gray"
+)
+
+# Reference-based colors for Plot 2
+ref_colors <- list(
+  reference_color = "orange",
+  mismatch_color = "red",
+  gap_color = "black",
+  missing_color = "orange"
+)
+
+# Alignment parameters (simple for now)
+alignment_params <- list(
+  iterations = 2,
+  refinements = 2,
+  gapOpening = -1000,
+  gapExtension = -500,
+  terminalGap = -2
+)
+
+# ===== FUNCTIONS =====
+
 all_same <- function(column) {
-  #return(column['CH'] == column['BP2'])
-  return(length(unique(column)) == 1)
+  length(unique(column)) == 1
 }
 
-color_list_for_plot <- function(plot_data, colors){
+assign_colors_by_reference <- function(df, ref_name, color_scheme) {
+  stopifnot(all(c("Position", "Sequence", "Base") %in% names(df)))
   
-  plot_data$Color = colors['mismatch_color']
+
+  ref_bases <- df %>%
+    filter(.data$Sequence == ref_name) %>%
+    select(Position, Base) 
+  ref_bases$Ref_base = ref_bases$Base
+  ref_bases$Base = NULL
   
-  # Get a helper column indicating what the 'ref' sequence is per position
-  ref_bases = plot_data[plot_data$Sequence == reference_seqname,c('Position','Base')]
-  colnames(ref_bases)[2] = 'Ref_base'
-  plot_data = left_join(plot_data, ref_bases, by="Position")
+  df <- left_join(df, ref_bases, by = "Position") %>%
+    mutate(Color = case_when(
+      Base == Ref_base ~ color_scheme$reference_color,
+      Base == "-" & Ref_base != "-" ~ color_scheme$gap_color,
+      TRUE ~ color_scheme$mismatch_color
+    ))
   
-  # Per position: if base is the same base as the reference, then color = ref color. 
-  plot_data[plot_data$Base == plot_data$Ref_base, 'Color'] <- colors['reference_color']
+  return(df)
+}
+
+BrowseSeqsCustom <- function(aligned_seqs, start, end) {
+  # Ensure it's a DNAStringSet
+  if (!inherits(aligned_seqs, "DNAStringSet")) {
+    stop("Input must be a DNAStringSet from DECIPHER::AlignSeqs")
+  }
   
-  # Per position: if ref base is not '-', but the seq base is '-', then color = grey
-  plot_data$Color[plot_data$Base == '-' & plot_data$Ref_base != '-'] <- colors['gap_color']
+  # Convert to alignment matrix
+  aln_matrix <- as.matrix(aligned_seqs)
   
-  return(plot_data)
+  # Validate range
+  aln_len <- ncol(aln_matrix)
+  if (start < 1 || end > aln_len || start > end) {
+    stop("Invalid start/end: must be within alignment length and start <= end.")
+  }
+  
+  # Subset matrix by alignment positions
+  subset_matrix <- aln_matrix[, start:end, drop = FALSE]
+  
+  # Reconstruct sequences
+  subset_seqs <- DNAStringSet(apply(subset_matrix, 1, paste0, collapse = ""))
+  names(subset_seqs) <- rownames(subset_matrix)
+  
+  # Launch browser
+  BrowseSeqs(subset_seqs)
 }
 
 
-fill_empty_spaces_for_secondplot <- function(plot_data){
-  # Step 1 & 2: Create a complete range of positions
-  complete_positions <- seq(min(plot_data$Position), max(plot_data$Position))
-  
-  # Step 3: Expand your data frame
-  expanded_data <- expand.grid(Position = complete_positions, Sequence = unique(plot_data$Sequence))
-  
-  # Step 4: Merge with the original data
-  merged_data <- merge(expanded_data, plot_data, by = c("Position", "Sequence"), all.x = TRUE)
-  
-  # Step 5: Fill missing colors with orange
-  merged_data$Color[is.na(merged_data$Color)] <- 'orange'
-  
-  return(merged_data)
+reorder_sequences <- function(df, ref_name, seqs) {
+  others <- setdiff(names(seqs), ref_name)
+  df$Sequence <- factor(df$Sequence, levels = c(others[1], ref_name, others[2]))
+  return(df)
 }
 
-plot_data_factorize_put_ref_in_middle <- function(plot_data, seqs){
-  plot_data$Sequence <- factor(plot_data$Sequence, 
-                               levels = c(names(seqs)[names(seqs) != reference_seqname][1],
-                                          reference_seqname, 
-                                          names(seqs)[names(seqs) != reference_seqname][2]))
-  return(plot_data)
-}
+# ===== MAIN =====
 
-# Load the sequences from the file
-seqs_fasta <- "../data/trio4/all.fa"
-
-seqs_fasta = '/Users/Z364220/projects/mini-programs/breakpoint_msa/data/toy.fa'
-seqs_fasta = '/Users/Z364220/projects/15q13/trio3/breakpoint_lab/15kbp/trio3_bps_all.fa'
-
+# Load sequences
 seqs <- readDNAStringSet(seqs_fasta)
 
-aln_custom = T
-gapOpen = -10
-gapExtension = -10000000
-misMatch = -1
-terminalGap = -0
-iterations = 10
-refinements = 10
-x_label_dist <- 10  # for example, every 10th position
-
-
-reference_seqname = 'child'
-colors = list(
-  'reference_color' = "orange",
-  'mismatch_color' = 'darkred',
-  'gap_color' = 'grey'
+# Align sequences
+aligned <- AlignSeqs(
+  seqs,
+  iterations = alignment_params$iterations,
+  refinements = alignment_params$refinements,
+  gapOpening = alignment_params$gapOpening,
+  gapExtension = alignment_params$gapExtension,
+  terminalGap = alignment_params$terminalGap,
+  useStructures = FALSE
 )
 
-
-if (aln_custom){
-  aligned <- AlignSeqs(
-            seqs, 
-            iterations=iterations, 
-            refinements=refinements, 
-            gapOpening = c(gapOpen,gapOpen), 
-            gapExtension = c(gapExtension,gapExtension),
-            useStructures = F,
-            terminalGap = terminalGap,
-            misMatch = misMatch
-            )
-} else {
-  aligned <- AlignSeqs(seqs)
-
-}
-
-
-
-
-# Convert alignment to a matrix for easier manipulation
+# Filter non-informative columns
 aligned_matrix <- as.matrix(aligned)
+keep_cols <- rep(TRUE, ncol(aligned_matrix)) #!apply(aligned_matrix, 2, all_same)
+filtered_matrix <- aligned_matrix[, keep_cols]
+positions <- which(keep_cols)
 
-
-# Apply the function to each column to get a logical vector where TRUE means the column should be removed
-columns_to_remove <- apply(aligned_matrix, 2, all_same)
-positions_to_keep <- which(columns_to_remove==F)
-filtered_aligned_matrix <- aligned_matrix[, positions_to_keep]
-
-
-# Get the original positions of the kept columns
-original_positions_filtered <- which(!columns_to_remove)
-
-
-# Create a data frame with the original positions, sequence identifiers, and bases
+# Build plot data frame
 plot_data <- data.frame(
-  Position = rep(original_positions_filtered, times = 3),
-  Sequence = factor(rep(names(seqs), each = length(original_positions_filtered))),
-  Base = as.vector(t(filtered_aligned_matrix))
+  Position = rep(positions, times = length(seqs)),
+  Sequence = rep(names(seqs), each = length(positions)),
+  Base = as.vector(t(filtered_matrix))
 )
 
-plot_data = color_list_for_plot(plot_data, colors)
+# ===== PLOT 1: base identity colors =====
 
-### PLOT ###
+plot_data_base <- plot_data %>%
+  mutate(Color = base_colors[Base])
 
-# Sort and prepare plot_data
-plot_data = plot_data[order(plot_data$Position, plot_data$Sequence),]
-plot_data = plot_data_factorize_put_ref_in_middle(plot_data,seqs)
+plot_data_base <- reorder_sequences(plot_data_base, reference_seqname, seqs)
 
-# Create vectors for x-axis breaks and labels (every nth position)
-x_breaks <- unique(ceiling(order(plot_data$Position)/3))[seq(1, length(unique(plot_data$Position)), by = x_label_dist)]
-x_labels <- unique(plot_data$Position)[seq(1, length(unique(plot_data$Position)), by = x_label_dist)]
-
-plot_data[plot_data$Base == '-', 'Color'] = 'grey'
-
-# Plot using geom_raster
-plot_data2 = plot_data[plot_data$Position > start & plot_data$Position < end,]
-plot_compress = ggplot(plot_data2, aes(x = ceiling(order(plot_data2$Position)/3), 
-                                      y = Sequence, 
-                                      fill = as.numeric(as.factor(Base)))) +
-    geom_raster() +
-    scale_fill_identity() +
-    theme_minimal() +
-    labs(x = "Position in original alignment", y = "Sequence") +
-    theme(panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank(),
-          axis.text.x = element_text(angle = 90, hjust = 1)) +  # Rotate x-axis labels
-    guides(fill = FALSE) +  # Remove the legend for fill
-    scale_x_continuous(breaks = x_breaks, labels = x_labels)  
-
-plot_compress
-  
-plot_data_full = fill_empty_spaces_for_secondplot(plot_data)
-
-start = 0
-end = 100000
-plot_data_full2 = plot_data_full[plot_data_full$Position > start & plot_data_full$Position < end,]
-
-plot_full <- ggplot(plot_data_full2[plot_data_full2$Color != 'orange',],
-                    aes(x = Position, y = Sequence, fill = Color)) +
-  geom_tile(width=10) +
+plot_base <- ggplot(plot_data_base, aes(
+  x = Position,
+  y = Sequence,
+  fill = Color
+)) +
+  geom_tile() +
   scale_fill_identity() +
   theme_minimal() +
-  labs(x = "Position in original alignment", y = "Sequence") +
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
-  guides(fill = FALSE)  
-plot_full
-plot_full <- ggplot(plot_data_full[plot_data_full$Color != 'orange',], 
-                    aes(x = Position, y = Sequence, fill = Color)) +
-  geom_tile(width=10) +
+  labs(x = "Position in alignment", y = "Sequence") +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1))
+
+# ===== PLOT 2: reference comparison colors =====
+
+plot_data_ref <- assign_colors_by_reference(plot_data, reference_seqname, ref_colors)
+plot_data_ref <- reorder_sequences(plot_data_ref, reference_seqname, seqs)
+
+# Sort data so red (mismatch) is last — plotted on top
+plot_data_ref_sorted <- plot_data_ref %>%
+  filter(Position >= start, Position < end) %>%
+  mutate(
+    draw_priority = case_when(
+      Color == "red" ~ 2,
+      TRUE ~ 1
+    )
+  ) %>%
+  arrange(draw_priority)
+
+# Get only the relevant columns
+gap_check <- plot_data_ref_sorted %>%
+  group_by(Position) %>%
+  summarise(all_non_gaps = all(Base != "-"))
+
+# Find the first and last positions where all bases are non-gap
+valid_positions <- gap_check$Position[gap_check$all_non_gaps]
+trim_start <- min(valid_positions)
+trim_end <- max(valid_positions)
+
+plot_data_ref_trimmed <- plot_data_ref_sorted %>%
+  filter(Position >= trim_start, Position <= trim_end)
+
+# Get the factor levels in the correct plotting order
+y_levels <- levels(plot_data_ref_sorted$Sequence)
+
+# Get their numeric positions
+y_pos <- seq_along(y_levels)
+
+# Compute positions between rows for orange lines
+hline_positions <- head(y_pos, -1) + 0.5
+
+plot_ref <- ggplot(plot_data_ref_trimmed, aes(
+  x = Position,
+  y = Sequence,
+  fill = Color
+)) +
+  geom_tile() +
+  geom_hline(yintercept = hline_positions, color = "orange", size = 0.5) +
   scale_fill_identity() +
   theme_minimal() +
-  labs(x = "Position in original alignment", y = "Sequence") +
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
-  guides(fill = FALSE)  
-# Remove the legend for fill
-#plot_full = plot_full + 
-#  ggplot(plot_data_full[plot_data_full$Color != 'orange',], 
-#         aes(x = Position, y = Sequence, fill = Color)) + geom_raster()
+  labs(x = "Position vs reference", y = "Sequence") +
+  theme(panel.grid = element_blank())
 
-#print(plot_compress)
-print(plot_full)
+print(plot_ref)
 
+
+# ===== SHOW PLOTS =====
+print(plot_base)
+print(plot_ref)
+
+
+#BrowseSeqs(aligned)
+#BrowseSeqsCustom(aligned,5941-5000,5944+5000)
+
+
+
+# Split data by color for layered plotting
+orange_data <- plot_data_ref_trimmed %>% filter(Color == "orange")
+black_data  <- plot_data_ref_trimmed %>% filter(Color == "black")
+red_data    <- plot_data_ref_trimmed %>% filter(Color == "red")
+
+# Plot with layered tiles
+plot_ref <- ggplot() +
+  geom_tile(data = orange_data, aes(x = Position, y = Sequence, fill = Color)) +
+  geom_tile(data = black_data, aes(x = Position, y = Sequence, fill = Color),
+            color = "black", size = 0.5) +  # black border = thicker visual
+  geom_tile(data = red_data, aes(x = Position, y = Sequence, fill = Color),
+            color = "red", size = 0.5) +    # red border = thicker visual
+  geom_hline(yintercept = hline_positions, color = "white", size = 2.5) +
+  scale_fill_identity() +
+  theme_minimal() +
+  labs(x = "Position vs reference", y = "Sequence") +
+  theme(panel.grid = element_blank())
+
+
+print(plot_ref)
