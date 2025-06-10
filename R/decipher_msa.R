@@ -3,28 +3,29 @@ library(ggplot2)
 library(reshape2)
 library(dplyr)
 
-seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio2/trio2_all.fa'
+seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio1/trio1_all.fa'
+out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/jun10/trionone.pdf'
 
 reference_seqname <- "child"
-x_label_dist <- 10
 start = 0 # 5900
 end = 1000000 #6000
-# Base-specific colors for Plot 1
+
+
+# Base-specific colors for Plot 1 
 base_colors <- c(
-  "A" = "green",
-  "T" = "red",
-  "G" = "orange",
-  "C" = "orange",
-  "-" = "black",
+  "A" = "#7fc97f",
+  "T" = "#beaed4",
+  "G" = "#fdc086",
+  "C" = "#ffff99",
+  "-" = "#386cb0",
   "N" = "gray"
 )
 
-# Reference-based colors for Plot 2
-ref_colors <- list(
-  reference_color = "orange",
-  mismatch_color = "red",
-  gap_color = "black",
-  missing_color = "orange"
+# Define ref_colors as a named vector (not a list)
+ref_colors <- c(
+  match = "orange",
+  mismatch = "black",
+  gap = "darkgrey"
 )
 
 # Alignment parameters (simple for now)
@@ -42,24 +43,46 @@ all_same <- function(column) {
   length(unique(column)) == 1
 }
 
-assign_colors_by_reference <- function(df, ref_name, color_scheme) {
+assign_basematch_by_reference <- function(df, ref_name, color_scheme) {
   stopifnot(all(c("Position", "Sequence", "Base") %in% names(df)))
   
-
   ref_bases <- df %>%
     filter(.data$Sequence == ref_name) %>%
     select(Position, Base) 
   ref_bases$Ref_base = ref_bases$Base
   ref_bases$Base = NULL
   
-  df <- left_join(df, ref_bases, by = "Position") %>%
-    mutate(Color = case_when(
-      Base == Ref_base ~ color_scheme$reference_color,
-      Base == "-" & Ref_base != "-" ~ color_scheme$gap_color,
-      TRUE ~ color_scheme$mismatch_color
-    ))
+  # df <- left_join(df, ref_bases, by = "Position") %>%
+  #   mutate(Color = case_when(
+  #     Base == Ref_base ~ color_scheme$reference_color,
+  #     Base == "-" & Ref_base != "-" ~ color_scheme$gap_color,
+  #     TRUE ~ color_scheme$mismatch_color
+  #   ))
   
+  df <- left_join(df, ref_bases, by = "Position") %>%
+    mutate(match = case_when(
+      Base == Ref_base ~ 'match',
+      Base == "-" & Ref_base != "-" ~ 'gap',
+      TRUE ~ 'mismatch'
+    ))
+
   return(df)
+}
+
+trim_leading_and_ending_gaps <- function(plot_data_ref) {
+  # Get only the relevant columns
+  gap_check <- plot_data_ref %>%
+    group_by(Position) %>%
+    summarise(all_non_gaps = all(Base != "-"))
+
+  # Find the first and last positions where all bases are non-gap
+  valid_positions <- gap_check$Position[gap_check$all_non_gaps]
+  trim_start <- min(valid_positions)
+  trim_end <- max(valid_positions)
+
+  plot_data_ref_trimmed <- plot_data_ref %>%
+    filter(Position >= trim_start, Position <= trim_end)
+  return(plot_data_ref_trimmed)
 }
 
 BrowseSeqsCustom <- function(aligned_seqs, start, end) {
@@ -113,67 +136,43 @@ aligned <- AlignSeqs(
 
 # Filter non-informative columns
 aligned_matrix <- as.matrix(aligned)
-keep_cols <- rep(TRUE, ncol(aligned_matrix)) #!apply(aligned_matrix, 2, all_same)
-filtered_matrix <- aligned_matrix[, keep_cols]
-positions <- which(keep_cols)
 
 # Build plot data frame
 plot_data <- data.frame(
-  Position = rep(positions, times = length(seqs)),
-  Sequence = rep(names(seqs), each = length(positions)),
-  Base = as.vector(t(filtered_matrix))
+  Position = rep(1:ncol(aligned_matrix), times = length(seqs)),
+  Sequence = rep(names(seqs), each = ncol(aligned_matrix)),
+  Base = as.vector(t(aligned_matrix))
 )
 
-# ===== PLOT 1: base identity colors =====
+# ===== Prepare PLOT 1: base identity colors =====
 
-plot_data_base <- plot_data %>%
-  mutate(Color = base_colors[Base])
+plot_data_plot1 <- reorder_sequences(plot_data, reference_seqname, seqs)
 
-plot_data_base <- reorder_sequences(plot_data_base, reference_seqname, seqs)
-
-plot_base <- ggplot(plot_data_base, aes(
+plot_base <- ggplot(plot_data_plot1, aes(
   x = Position,
   y = Sequence,
-  fill = Color
+  fill = Base
 )) +
   geom_tile() +
-  scale_fill_identity() +
+  scale_fill_manual(values = base_colors, na.value = "white") +
   theme_minimal() +
-  labs(x = "Position in alignment", y = "Sequence") +
+  labs(x = "Position in alignment", y = "Sequence", fill = "Base") +
   theme(panel.grid = element_blank(),
         axis.text.x = element_text(angle = 90, hjust = 1))
 
-# ===== PLOT 2: reference comparison colors =====
+# ===== Prepare PLOT 2: reference comparison colors =====
 
-plot_data_ref <- assign_colors_by_reference(plot_data, reference_seqname, ref_colors)
+plot_data_ref <- assign_basematch_by_reference(plot_data_plot1, reference_seqname, ref_colors)
 plot_data_ref <- reorder_sequences(plot_data_ref, reference_seqname, seqs)
 
-# Sort data so red (mismatch) is last — plotted on top
-plot_data_ref_sorted <- plot_data_ref %>%
-  filter(Position >= start, Position < end) %>%
-  mutate(
-    draw_priority = case_when(
-      Color == "red" ~ 2,
-      TRUE ~ 1
-    )
-  ) %>%
-  arrange(draw_priority)
+plot_data_ref = trim_leading_and_ending_gaps(plot_data_ref)
 
-# Get only the relevant columns
-gap_check <- plot_data_ref_sorted %>%
-  group_by(Position) %>%
-  summarise(all_non_gaps = all(Base != "-"))
 
-# Find the first and last positions where all bases are non-gap
-valid_positions <- gap_check$Position[gap_check$all_non_gaps]
-trim_start <- min(valid_positions)
-trim_end <- max(valid_positions)
 
-plot_data_ref_trimmed <- plot_data_ref_sorted %>%
-  filter(Position >= trim_start, Position <= trim_end)
+# Plot 
 
 # Get the factor levels in the correct plotting order
-y_levels <- levels(plot_data_ref_sorted$Sequence)
+y_levels <- levels(plot_data_ref$Sequence)
 
 # Get their numeric positions
 y_pos <- seq_along(y_levels)
@@ -181,48 +180,44 @@ y_pos <- seq_along(y_levels)
 # Compute positions between rows for orange lines
 hline_positions <- head(y_pos, -1) + 0.5
 
-plot_ref <- ggplot(plot_data_ref_trimmed, aes(
-  x = Position,
-  y = Sequence,
-  fill = Color
-)) +
-  geom_tile() +
-  geom_hline(yintercept = hline_positions, color = "orange", size = 0.5) +
-  scale_fill_identity() +
-  theme_minimal() +
-  labs(x = "Position vs reference", y = "Sequence") +
-  theme(panel.grid = element_blank())
+# Split data
+# Group and summarize data
+alignment_intervals <- plot_data_ref %>%
+  group_by(Sequence, match, grp = cumsum(match != lag(match, default = first(match)) | Sequence != lag(Sequence, default = first(Sequence)))) %>%
+  summarize(start = first(Position), end = last(Position), .groups = "drop")
 
-print(plot_ref)
+# Extract unique sequence names
+sequence_names <- levels(alignment_intervals$Sequence)
 
-
-# ===== SHOW PLOTS =====
-print(plot_base)
-print(plot_ref)
-
-
-#BrowseSeqs(aligned)
-#BrowseSeqsCustom(aligned,5941-5000,5944+5000)
-
-
-
-# Split data by color for layered plotting
-orange_data <- plot_data_ref_trimmed %>% filter(Color == "orange")
-black_data  <- plot_data_ref_trimmed %>% filter(Color == "black")
-red_data    <- plot_data_ref_trimmed %>% filter(Color == "red")
-
-# Plot with layered tiles
+# Plot with layered tiles and color using ref_colors
 plot_ref <- ggplot() +
-  geom_tile(data = orange_data, aes(x = Position, y = Sequence, fill = Color)) +
-  geom_tile(data = black_data, aes(x = Position, y = Sequence, fill = Color),
-            color = "black", size = 0.5) +  # black border = thicker visual
-  geom_tile(data = red_data, aes(x = Position, y = Sequence, fill = Color),
-            color = "red", size = 0.5) +    # red border = thicker visual
-  geom_hline(yintercept = hline_positions, color = "white", size = 2.5) +
-  scale_fill_identity() +
+  geom_rect(data = alignment_intervals %>% filter(match == "match"),
+            aes(xmin = start, xmax = end, ymin = as.numeric(Sequence), ymax = as.numeric(Sequence) + 1),
+            fill = ref_colors["match"]) +
+  geom_rect(data = alignment_intervals %>% filter(match == "gap"),
+            aes(xmin = start, xmax = end, ymin = as.numeric(Sequence), ymax = as.numeric(Sequence) + 1),
+            fill = ref_colors["gap"],
+            color = ref_colors["gap"], size = 0.5) +
+  geom_rect(data = alignment_intervals %>% filter(match == "mismatch"),
+            aes(xmin = start, xmax = end, ymin = as.numeric(Sequence), ymax = as.numeric(Sequence) + 1),
+            fill = ref_colors["mismatch"],
+            color = ref_colors["mismatch"], size = 0.5) +
+  geom_hline(yintercept = c(1,2,3,4), color = "white", size = 2.5) +
+  scale_y_continuous(breaks = seq_along(sequence_names)+0.5, labels = sequence_names) +
   theme_minimal() +
   labs(x = "Position vs reference", y = "Sequence") +
-  theme(panel.grid = element_blank())
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  labs(x='MSA position', y='')
 
+plot_ref
 
-print(plot_ref)
+ggsave(plot_ref, file=out_file, device = pdf, width=10, height=3, units='in')
+
+# Define the custom order using indices
+custom_order_indices <- c(3, 1, 2)
+
+# Sort the sequences based on the custom order
+sorted_aligned <- aligned[custom_order_indices]
+BrowseSeqs(sorted_aligned)
+
