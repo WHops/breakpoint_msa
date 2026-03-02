@@ -3,11 +3,70 @@ library(ggplot2)
 library(reshape2)
 library(dplyr)
 
-seqs_fasta = '/path/to/trio2_all.fa'
-out_file = '/path/to/output.pdf'
-xplotstart = 44000 # Iteratively adjusted to make the plot prettier. It's x-axis limits
-xplotend = 64000 # Iteratively adjusted to make the plot prettier. It's x-axis limits
-reference_seqname <- "child" # This sequence name has to be present in seqs_fasta file. 
+
+trio = 5
+
+if (trio==1){
+  seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio1/trio1_all.fa'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/trio1.pdf'
+  xplotstart = 0
+  xplotend = 10000
+}
+
+if (trio==2){
+  seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio2/trio2_all.fa'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/trio2.pdf'
+  xplotstart = 44000
+  xplotend = 64000
+}
+
+
+if (trio==3){
+  seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio3/trio3_all.fa'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/trio3.pdf'
+  xplotstart = 0
+  xplotend = 20000
+}
+
+if (trio==4){
+  seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio4/trio4_all.fa'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/trio4.pdf'
+  xplotstart = 0
+  xplotend = 3000
+}
+
+if (trio==6){
+  
+  # Trio6
+  seqs_fasta = '/Users/whops/projects/mini-programs/crosshair/breakpoint_lab/trio6/trio6_all.fa'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/trio6.pdf'
+  xplotstart = 15000
+  xplotend = 35000
+
+}
+
+if (trio==66){
+  seqs_fasta = '/Users/whops/projects/mini-programs/breakpoint_msa/data/T6/T6_seqs.fasta'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/T6.pdf'
+  xplotstart = 0
+  xplotend = 40000
+}
+# Trio 2
+
+
+if (trio==5){
+  seqs_fasta = '/Users/whops/projects/mini-programs/breakpoint_msa/data/T5/T5_seqs.fasta'
+  out_file = '/Users/whops/projects/mini-programs/breakpoint_msa/plots/sep25/T5.pdf'
+  xplotstart = 0
+  xplotend = 22000
+}
+# Trio 2
+
+
+
+reference_seqname <- "child"
+
+
 
 # Base-specific colors for Plot 1 
 base_colors <- c(
@@ -246,15 +305,12 @@ plot_ref
 
 ggsave(plot_ref, file=out_file, device = pdf, width=10, height=3, units='in')
 
-
-# Optionally: Also open the alignment in a browser
-
 # Define the custom order using indices
 custom_order_indices <- c(3, 1, 2)
+
 custom_order_indices <- c(2, 1, 3)
 
 # Sort the sequences based on the custom order
 sorted_aligned <- aligned[custom_order_indices]
-
 BrowseSeqs(sorted_aligned)
 
