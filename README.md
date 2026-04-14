@@ -54,7 +54,8 @@ This is typically the rearrangement-carrying sequence.
 
 ## Usage
 
-Currently not highly automated. Open in Rscript, edit your paths, run. Please let me know if you have any issues. 
+Run decipher_msa.R interactively in Rstudio (It is preconfigured to run the test-data provided in the repo).
+In practice, exchange the input with your own 3-sequence .fa file.
 
 ------------------------------------------------------------------------
 
